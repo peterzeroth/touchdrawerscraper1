@@ -192,15 +192,10 @@ async function handleTeamSelection(page) {
         };
     });
     
-    // Only output if we found a drawer link
+    // Log drawer info but don't output it - you'll handle that in the second scraper
     if (drawerInfo.found) {
-        await Actor.pushData({
-            type: 'drawer-url',
-            url: drawerInfo.url,
-            linkText: drawerInfo.linkText,
-            teamPageUrl: page.url()
-        });
-        console.log(`✓ Successfully found drawer URL: ${drawerInfo.url}`);
+        console.log(`✓ Found drawer URL: ${drawerInfo.url}`);
+        console.log(`This URL can be used as input for the second scraper`);
     } else {
         console.log('✗ No drawer link found on team page');
         console.log(`Team page URL: ${page.url()}`);
