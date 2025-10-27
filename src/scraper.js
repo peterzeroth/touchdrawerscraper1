@@ -63,17 +63,14 @@ async function handleDrawScraping(page) {
             const dateEl = matchEl.querySelector('.match-header__title');
             const date = dateEl ? dateEl.textContent.trim().split('\n')[0].trim() : '';
             
-            // Extract datetime attribute if available
+            // Extract datetime attribute and kick-off time
             const timeEl = matchEl.querySelector('time');
             const dateTime = timeEl ? timeEl.getAttribute('datetime') : '';
+            const kickOffTime = timeEl ? timeEl.textContent.trim() : '';
             
             // Extract round
             const roundEl = matchEl.querySelector('.match-header__title span');
             const round = roundEl ? roundEl.textContent.trim() : '';
-            
-            // Extract kick-off time
-            const timeEl = matchEl.querySelector('time');
-            const kickOffTime = timeEl ? timeEl.textContent.trim() : '';
             
             // Extract home team
             const homeTeamEl = matchEl.querySelector('.match-team__name--home');
