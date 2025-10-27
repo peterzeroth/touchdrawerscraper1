@@ -46,8 +46,9 @@ const crawler = new PlaywrightCrawler({
 async function handleDrawScraping(page) {
     console.log(`Scraping match data from: ${page.url()}`);
     
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(3000);
+    // Wait for the matches list to appear
+    await page.waitForSelector('ul.l-grid', { timeout: 30000 });
+    await page.waitForTimeout(500);
     
     // Extract match data from the draw page
     const matches = await page.evaluate(() => {

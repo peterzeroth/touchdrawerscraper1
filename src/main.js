@@ -57,9 +57,9 @@ const crawler = new PlaywrightCrawler({
 async function handleSearch(page, teamName, selectedTeamIndex) {
     console.log(`Searching for team: ${teamName}`);
     
-    // Wait for the page to load
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(3000);
+    // Wait for search results to appear
+    await page.waitForSelector('#search-results', { timeout: 30000 });
+    await page.waitForTimeout(1000);
     
     // Look for search results - updated for Touch Football Australia structure
     const results = await page.evaluate(() => {
@@ -163,8 +163,8 @@ async function handleTeamSelection(page) {
     console.log(`On team page: ${page.url()}`);
     
     // Wait for page to load
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    await page.waitForLoadState('domcontentloaded');
+    await page.waitForTimeout(500);
     
     // Look for "Draw" or similar links on the team page
     const drawerInfo = await page.evaluate(() => {
