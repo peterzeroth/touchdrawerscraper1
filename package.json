@@ -1,10 +1,10 @@
 {
-  "name": "touchdraw-scraper",
+  "name": "touchdraw-discover",
   "version": "0.1.0",
-  "description": "Scrapes Touch Football team rosters from drawer URLs",
+  "description": "Discovers drawer URLs for Touch Football teams",
   "type": "module",
   "scripts": {
-    "start": "node src/scraper.js",
+    "start": "node src/main.js",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "dependencies": {
