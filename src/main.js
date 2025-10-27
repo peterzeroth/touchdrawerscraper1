@@ -75,16 +75,23 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
             const links = searchResults.querySelectorAll('a[href*="/Competitions/"]');
             
             links.forEach(link => {
-                // Extract team name from the <dl> element
+                // Extract team name from the <dl> element with class u-spacing-mb-xx-small
                 const dlElement = link.querySelector('dl.u-spacing-mb-xx-small');
-                const competitionName = link.querySelector('.club-card-content__club');
+                // Extract competition name from the <p> element with class club-card-content__club
+                const competitionElement = link.querySelector('p.club-card-content__club');
                 const teamName = dlElement ? dlElement.textContent.trim() : null;
+                const competitionName = competitionElement ? competitionElement.textContent.trim() : '';
                 
                 if (teamName && link.href) {
+                    // Make the URL absolute
+                    const absoluteUrl = link.href.startsWith('http') 
+                        ? link.href 
+                        : `https://touchfootball.com.au${link.href}`;
+                    
                     teamOptions.push({
                         name: teamName,
-                        url: link.href,
-                        competition: competitionName ? competitionName.textContent.trim() : ''
+                        url: absoluteUrl,
+                        competition: competitionName
                     });
                 }
             });
