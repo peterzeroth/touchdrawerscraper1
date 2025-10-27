@@ -49,12 +49,8 @@ const crawler = new PlaywrightCrawler({
     },
     
     async errorHandler({ request }) {
-        console.error(`Request ${request.url} failed multiple times.`);
-        await Actor.pushData({
-            type: 'error',
-            message: 'Request failed multiple times',
-            url: request.url
-        });
+        // Silently handle errors - they're often just timeouts during page load
+        console.log(`Request ${request.url} encountered issues but continuing...`);
     },
 });
 
@@ -118,12 +114,16 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
             console.log(`Option ${index + 1}: ${result.name} - ${result.url}`);
         });
         
-        // Store team options
-        await Actor.pushData({
-            type: 'team-options',
-            options: results,
-            selectedIndex: selectedTeamIndex
-        });
+        // Store each team option as a separate data item
+        for (const result of results) {
+            await Actor.pushData({
+                type: 'team-option',
+                name: result.name,
+                url: result.url,
+                competition: result.competition,
+                index: results.indexOf(result)
+            });
+        }
         
         // Determine which team to select
         let teamToSelect;
@@ -192,19 +192,15 @@ async function handleTeamSelection(page) {
         };
     });
     
-    // Save the result
-    await Actor.pushData({
-        type: 'drawer-url',
-        found: drawerInfo.found,
-        url: drawerInfo.url,
-        linkText: drawerInfo.linkText,
-        teamPageUrl: page.url(),
-        timestamp: new Date().toISOString()
-    });
-    
+    // Only output if we found a drawer link
     if (drawerInfo.found) {
+        await Actor.pushData({
+            type: 'drawer-url',
+            url: drawerInfo.url,
+            linkText: drawerInfo.linkText,
+            teamPageUrl: page.url()
+        });
         console.log(`✓ Successfully found drawer URL: ${drawerInfo.url}`);
-        console.log(`Link text: ${drawerInfo.linkText}`);
     } else {
         console.log('✗ No drawer link found on team page');
         console.log(`Team page URL: ${page.url()}`);
