@@ -48,74 +48,97 @@ const crawler = new PlaywrightCrawler({
 });
 
 async function handleDrawScraping(page) {
-    console.log(`Scraping player data from: ${page.url()}`);
+    console.log(`Scraping match data from: ${page.url()}`);
     
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
     
-    // Extract player data - customize based on actual page structure
-    const playerData = await page.evaluate(() => {
-        const players = [];
+    // Extract match data from the draw page
+    const matches = await page.evaluate(() => {
+        const matchElements = document.querySelectorAll('ul.l-grid > li');
+        const matchesData = [];
         
-        // Try multiple selectors for player information
-        // First, try to find player rows in tables
-        const tableRows = document.querySelectorAll('tr, .player-row, .player-item');
-        
-        tableRows.forEach(row => {
-            const cells = row.querySelectorAll('td, .player-name, .player-position, .number');
-            if (cells.length > 0) {
-                const name = row.querySelector('.player-name, .name, td:first-child')?.textContent?.trim();
-                if (name && name.length > 0 && name !== 'Name' && name !== 'Player') {
-                    players.push({
-                        name: name,
-                        position: row.querySelector('.position, .pos')?.textContent?.trim() || 'Unknown',
-                        jerseyNumber: row.querySelector('.number, .jersey')?.textContent?.trim() || 'Unknown'
-                    });
-                }
+        matchElements.forEach(matchEl => {
+            // Extract date (first line)
+            const dateEl = matchEl.querySelector('.match-header__title');
+            const date = dateEl ? dateEl.textContent.trim().split('\n')[0].trim() : '';
+            
+            // Extract datetime attribute if available
+            const timeEl = matchEl.querySelector('time');
+            const dateTime = timeEl ? timeEl.getAttribute('datetime') : '';
+            
+            // Extract round
+            const roundEl = matchEl.querySelector('.match-header__title span');
+            const round = roundEl ? roundEl.textContent.trim() : '';
+            
+            // Extract kick-off time
+            const timeEl = matchEl.querySelector('time');
+            const kickOffTime = timeEl ? timeEl.textContent.trim() : '';
+            
+            // Extract home team
+            const homeTeamEl = matchEl.querySelector('.match-team__name--home');
+            const homeTeam = homeTeamEl ? homeTeamEl.textContent.trim() : '';
+            
+            // Extract away team
+            const awayTeamEl = matchEl.querySelector('.match-team__name--away');
+            const awayTeam = awayTeamEl ? awayTeamEl.textContent.trim() : '';
+            
+            // Extract venue
+            const venueEl = matchEl.querySelector('.match-cta__link');
+            const venue = venueEl ? venueEl.textContent.trim() : '';
+            
+            // Extract match URL
+            const matchLink = matchEl.querySelector('a[href*="/Competitions/Match/"]');
+            const matchUrl = matchLink ? matchLink.href : '';
+            
+            // Extract match URL relative path
+            const matchUrlRelative = matchLink ? matchLink.getAttribute('href') : '';
+            
+            if (homeTeam && awayTeam) {
+                matchesData.push({
+                    date: date,
+                    round: round,
+                    kickOffTime: kickOffTime,
+                    dateTime: dateTime,
+                    homeTeam: homeTeam,
+                    awayTeam: awayTeam,
+                    venue: venue,
+                    matchUrl: matchUrl,
+                    matchUrlRelative: matchUrlRelative
+                });
             }
         });
         
-        // If no players found in tables, try other structures
-        if (players.length === 0) {
-            const playerElements = document.querySelectorAll('.player, [data-player], div[class*="player"]');
-            playerElements.forEach(element => {
-                const name = element.querySelector('.name, .player-name, strong, b')?.textContent?.trim();
-                if (name && name.length > 0) {
-                    players.push({
-                        name: name,
-                        position: 'Unknown',
-                        jerseyNumber: 'Unknown'
-                    });
-                }
-            });
-        }
-        
-        return players;
+        return matchesData;
     });
     
-    console.log(`Found ${playerData.length} players`);
+    console.log(`Found ${matches.length} matches`);
     
-    if (playerData.length > 0) {
-        await Actor.pushData({
-            type: 'roster',
-            players: playerData,
-            drawerUrl: page.url(),
-            scrapedAt: new Date().toISOString(),
-        });
-        console.log(`✓ Successfully scraped ${playerData.length} players`);
+    if (matches.length > 0) {
+        // Output each match as a separate data item
+        for (const match of matches) {
+            await Actor.pushData({
+                type: 'match',
+                date: match.date,
+                round: match.round,
+                kickOffTime: match.kickOffTime,
+                dateTime: match.dateTime,
+                homeTeam: match.homeTeam,
+                awayTeam: match.awayTeam,
+                venue: match.venue,
+                matchUrl: match.matchUrl,
+                matchUrlRelative: match.matchUrlRelative,
+                scrapedFrom: page.url()
+            });
+        }
+        console.log(`✓ Successfully scraped ${matches.length} matches`);
     } else {
-        // Save page content for debugging
-        console.log('No players found. Saving page structure for debugging.');
-        const pageHtml = await page.evaluate(() => document.body.innerHTML);
-        
+        console.log('✗ No match data found');
         await Actor.pushData({
-            type: 'roster',
-            message: 'No player data found',
-            drawerUrl: page.url(),
-            note: 'The page structure may need custom selectors',
-            pageHtmlSample: pageHtml.substring(0, 2000) // First 2000 chars for debugging
+            type: 'error',
+            message: 'No match data found',
+            drawerUrl: page.url()
         });
-        console.log('✗ No player data found');
     }
 }
 
