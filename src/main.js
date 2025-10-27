@@ -5,22 +5,31 @@ await Actor.init();
 
 // Get input configuration
 const input = await Actor.getInput();
-const { drawerUrl } = input;
+const { startUrl, teamName, selectedTeamIndex } = input;
 
-if (!drawerUrl) {
-    throw new Error('Please provide drawerUrl in the input');
+if (!startUrl || !teamName) {
+    throw new Error('Please provide both startUrl and teamName in the input');
 }
 
-console.log(`Starting scraper for drawer URL: ${drawerUrl}`);
+console.log(`Starting discovery for team: ${teamName}`);
+console.log(`Search URL: ${startUrl}`);
 
 const requestQueue = await Actor.openRequestQueue();
 
-// Add the drawer URL request
+// Build the search URL with the team name
+const searchTerm = encodeURIComponent(teamName.toLowerCase());
+const searchUrl = `${startUrl}${searchTerm}`;
+
+console.log(`Built search URL: ${searchUrl}`);
+
+// Add the search request with the search URL
 await requestQueue.addRequest({
-    url: drawerUrl,
-    uniqueKey: 'drawer-scrape',
+    url: searchUrl,
+    uniqueKey: `search-${teamName}`,
     userData: {
-        stage: 'scrape-draw',
+        stage: 'search',
+        teamName: teamName,
+        selectedTeamIndex: selectedTeamIndex,
     },
 });
 
@@ -28,12 +37,14 @@ const crawler = new PlaywrightCrawler({
     requestQueue,
     
     async requestHandler({ request, page }) {
-        const { stage } = request.userData;
+        const { stage, teamName, selectedTeamIndex } = request.userData;
 
         console.log(`Processing stage: ${stage}`);
 
-        if (stage === 'scrape-draw') {
-            await handleDrawScraping(page);
+        if (stage === 'search') {
+            await handleSearch(page, teamName, selectedTeamIndex);
+        } else if (stage === 'team-selection') {
+            await handleTeamSelection(page);
         }
     },
     
@@ -47,75 +58,149 @@ const crawler = new PlaywrightCrawler({
     },
 });
 
-async function handleDrawScraping(page) {
-    console.log(`Scraping player data from: ${page.url()}`);
+async function handleSearch(page, teamName, selectedTeamIndex) {
+    console.log(`Searching for team: ${teamName}`);
     
+    // Wait for the page to load
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
     
-    // Extract player data - customize based on actual page structure
-    const playerData = await page.evaluate(() => {
-        const players = [];
+    // Look for search results - updated for Touch Football Australia structure
+    const results = await page.evaluate(() => {
+        const teamOptions = [];
         
-        // Try multiple selectors for player information
-        // First, try to find player rows in tables
-        const tableRows = document.querySelectorAll('tr, .player-row, .player-item');
-        
-        tableRows.forEach(row => {
-            const cells = row.querySelectorAll('td, .player-name, .player-position, .number');
-            if (cells.length > 0) {
-                const name = row.querySelector('.player-name, .name, td:first-child')?.textContent?.trim();
-                if (name && name.length > 0 && name !== 'Name' && name !== 'Player') {
-                    players.push({
-                        name: name,
-                        position: row.querySelector('.position, .pos')?.textContent?.trim() || 'Unknown',
-                        jerseyNumber: row.querySelector('.number, .jersey')?.textContent?.trim() || 'Unknown'
-                    });
-                }
-            }
-        });
-        
-        // If no players found in tables, try other structures
-        if (players.length === 0) {
-            const playerElements = document.querySelectorAll('.player, [data-player], div[class*="player"]');
-            playerElements.forEach(element => {
-                const name = element.querySelector('.name, .player-name, strong, b')?.textContent?.trim();
-                if (name && name.length > 0) {
-                    players.push({
-                        name: name,
-                        position: 'Unknown',
-                        jerseyNumber: 'Unknown'
+        // Find all links within the search results grid
+        const searchResults = document.getElementById('search-results');
+        if (searchResults) {
+            const links = searchResults.querySelectorAll('a[href*="/Competitions/"]');
+            
+            links.forEach(link => {
+                // Extract team name from the <dl> element
+                const dlElement = link.querySelector('dl.u-spacing-mb-xx-small');
+                const competitionName = link.querySelector('.club-card-content__club');
+                const teamName = dlElement ? dlElement.textContent.trim() : null;
+                
+                if (teamName && link.href) {
+                    teamOptions.push({
+                        name: teamName,
+                        url: link.href,
+                        competition: competitionName ? competitionName.textContent.trim() : ''
                     });
                 }
             });
         }
         
-        return players;
+        // Remove duplicates based on URL
+        const uniqueResults = [];
+        const seenUrls = new Set();
+        teamOptions.forEach(option => {
+            if (!seenUrls.has(option.url)) {
+                seenUrls.add(option.url);
+                uniqueResults.push(option);
+            }
+        });
+        
+        return uniqueResults;
     });
     
-    console.log(`Found ${playerData.length} players`);
+    console.log(`Found ${results.length} team options`);
     
-    if (playerData.length > 0) {
-        await Actor.pushData({
-            type: 'roster',
-            players: playerData,
-            drawerUrl: page.url(),
-            scrapedAt: new Date().toISOString(),
+    if (results.length > 0) {
+        // Log all found options
+        results.forEach((result, index) => {
+            console.log(`Option ${index + 1}: ${result.name} - ${result.url}`);
         });
-        console.log(`✓ Successfully scraped ${playerData.length} players`);
-    } else {
-        // Save page content for debugging
-        console.log('No players found. Saving page structure for debugging.');
-        const pageHtml = await page.evaluate(() => document.body.innerHTML);
         
+        // Store team options
         await Actor.pushData({
-            type: 'roster',
-            message: 'No player data found',
-            drawerUrl: page.url(),
-            note: 'The page structure may need custom selectors',
-            pageHtmlSample: pageHtml.substring(0, 2000) // First 2000 chars for debugging
+            type: 'team-options',
+            options: results,
+            selectedIndex: selectedTeamIndex
         });
-        console.log('✗ No player data found');
+        
+        // Determine which team to select
+        let teamToSelect;
+        if (selectedTeamIndex !== undefined && selectedTeamIndex !== null) {
+            if (selectedTeamIndex >= 0 && selectedTeamIndex < results.length) {
+                teamToSelect = results[selectedTeamIndex];
+                console.log(`Using provided team index ${selectedTeamIndex}: ${teamToSelect.name}`);
+            } else {
+                console.log(`Invalid team index ${selectedTeamIndex}. Defaulting to first option.`);
+                teamToSelect = results[0];
+            }
+        } else {
+            teamToSelect = results[0];
+            console.log(`No team selection provided. Defaulting to first option: ${teamToSelect.name}`);
+        }
+        
+        // Proceed to the team page
+        await requestQueue.addRequest({
+            url: teamToSelect.url,
+            uniqueKey: `team-${Date.now()}`,
+            userData: {
+                stage: 'team-selection',
+            },
+        });
+    } else {
+        console.log('No search results found.');
+        await Actor.pushData({
+            type: 'error',
+            message: 'No search results found',
+            pageUrl: page.url(),
+            teamName: teamName
+        });
+    }
+}
+
+async function handleTeamSelection(page) {
+    console.log(`On team page: ${page.url()}`);
+    
+    // Wait for page to load
+    await page.waitForLoadState('networkidle');
+    await page.waitForTimeout(2000);
+    
+    // Look for "Draw" or similar links on the team page
+    const drawerInfo = await page.evaluate(() => {
+        // Look for links containing "draw", "squad", "roster", or similar
+        const links = Array.from(document.querySelectorAll('a'));
+        const drawerLink = links.find(link => {
+            const href = link.href?.toLowerCase();
+            const text = link.textContent?.toLowerCase();
+            return (href && (href.includes('draw') || href.includes('squad') || href.includes('roster'))) ||
+                   (text && (text.includes('draw') || text.includes('squad') || text.includes('roster')));
+        });
+        
+        if (drawerLink) {
+            return {
+                found: true,
+                url: drawerLink.href,
+                linkText: drawerLink.textContent?.trim()
+            };
+        }
+        
+        return {
+            found: false,
+            url: null,
+            linkText: null
+        };
+    });
+    
+    // Save the result
+    await Actor.pushData({
+        type: 'drawer-url',
+        found: drawerInfo.found,
+        url: drawerInfo.url,
+        linkText: drawerInfo.linkText,
+        teamPageUrl: page.url(),
+        timestamp: new Date().toISOString()
+    });
+    
+    if (drawerInfo.found) {
+        console.log(`✓ Successfully found drawer URL: ${drawerInfo.url}`);
+        console.log(`Link text: ${drawerInfo.linkText}`);
+    } else {
+        console.log('✗ No drawer link found on team page');
+        console.log(`Team page URL: ${page.url()}`);
     }
 }
 

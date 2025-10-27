@@ -1,0 +1,29 @@
+PASTE YOUR HTML HERE - Example format:
+
+<div class="search-results">
+  <div class="result-item">
+    <a href="/competitions/team/12345">
+      <span class="team-name">ADF Warriors</span>
+    </a>
+    <div class="team-info">Competition: ACT Division 1</div>
+  </div>
+  <div class="result-item">
+    <a href="/competitions/team/67890">
+      <span class="team-name">ADF Warriors 2</span>
+    </a>
+    <div class="team-info">Competition: NSW Division 2</div>
+  </div>
+</div>
+
+OR
+
+<table class="results">
+  <tr>
+    <td><a href="...">Team Name 1</a></td>
+    <td>Competition Name 1</td>
+  </tr>
+  <tr>
+    <td><a href="...">Team Name 2</a></td>
+    <td>Competition Name 2</td>
+  </tr>
+</table>
