@@ -1,0 +1,16 @@
+{
+  "actorSpecification": 1,
+  "name": "touchdraw-scraper",
+  "title": "Touch Draw Scraper",
+  "description": "Scrapes football team rosters from search results and team pages",
+  "version": "0.1",
+  "buildTag": "latest",
+  "dockerfileFile": "Dockerfile",
+  "storages": {
+    "dataset": "./storage/datasets/default",
+    "keyValueStore": "./storage/key_value_stores/default"
+  },
+  "template": "puppeteer_crawler",
+  "input": "./INPUT.json",
+  "readme": "./README.md"
+}
