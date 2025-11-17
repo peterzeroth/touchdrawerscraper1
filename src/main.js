@@ -1,207 +1,57 @@
 import { Actor } from 'apify';
-import { PlaywrightCrawler } from 'crawlee';
 
+// Initialize Actor to read input and determine which mode to run
 await Actor.init();
 
-// Get input configuration
+// Get input to determine which mode to run
 const input = await Actor.getInput();
-const { startUrl, teamName, selectedTeamIndex } = input;
+const { mode, drawerUrl, startUrl, teamName } = input;
 
-if (!startUrl || !teamName) {
-    throw new Error('Please provide both startUrl and teamName in the input');
-}
+// Determine mode: if drawerUrl exists, it's scraper mode; if startUrl/teamName exists, it's discover mode
+// Or explicitly set via 'mode' parameter
+let runMode = mode;
 
-console.log(`Starting discovery for team: ${teamName}`);
-console.log(`Search URL: ${startUrl}`);
-
-const requestQueue = await Actor.openRequestQueue();
-
-// Build the search URL with the team name
-const searchTerm = encodeURIComponent(teamName.toLowerCase());
-const searchUrl = `${startUrl}${searchTerm}`;
-
-console.log(`Built search URL: ${searchUrl}`);
-
-// Add the search request with the search URL
-await requestQueue.addRequest({
-    url: searchUrl,
-    uniqueKey: `search-${teamName}`,
-    userData: {
-        stage: 'search',
-        teamName: teamName,
-        selectedTeamIndex: selectedTeamIndex,
-    },
-});
-
-const crawler = new PlaywrightCrawler({
-    requestQueue,
-    
-    async requestHandler({ request, page }) {
-        const { stage, teamName, selectedTeamIndex } = request.userData;
-
-        console.log(`Processing stage: ${stage}`);
-
-        if (stage === 'search') {
-            await handleSearch(page, teamName, selectedTeamIndex);
-        } else if (stage === 'team-selection') {
-            await handleTeamSelection(page);
-        }
-    },
-    
-    async errorHandler({ request }) {
-        // Silently handle errors - they're often just timeouts during page load
-        console.log(`Request ${request.url} encountered issues but continuing...`);
-    },
-});
-
-async function handleSearch(page, teamName, selectedTeamIndex) {
-    console.log(`Searching for team: ${teamName}`);
-    
-    // Wait for search results to appear
-    await page.waitForSelector('#search-results', { timeout: 30000 });
-    await page.waitForTimeout(1000);
-    
-    // Look for search results - updated for Touch Football Australia structure
-    const results = await page.evaluate(() => {
-        const teamOptions = [];
-        
-        // Find all links within the search results grid
-        const searchResults = document.getElementById('search-results');
-        if (searchResults) {
-            const links = searchResults.querySelectorAll('a[href*="/Competitions/"]');
-            
-            links.forEach(link => {
-                // Extract team name from the <dl> element with class u-spacing-mb-xx-small
-                const dlElement = link.querySelector('dl.u-spacing-mb-xx-small');
-                // Extract competition name from the <p> element with class club-card-content__club
-                const competitionElement = link.querySelector('p.club-card-content__club');
-                const teamName = dlElement ? dlElement.textContent.trim() : null;
-                const competitionName = competitionElement ? competitionElement.textContent.trim() : '';
-                
-                if (teamName && link.href) {
-                    // Make the URL absolute
-                    const absoluteUrl = link.href.startsWith('http') 
-                        ? link.href 
-                        : `https://touchfootball.com.au${link.href}`;
-                    
-                    teamOptions.push({
-                        name: teamName,
-                        url: absoluteUrl,
-                        competition: competitionName
-                    });
-                }
-            });
-        }
-        
-        // Remove duplicates based on URL
-        const uniqueResults = [];
-        const seenUrls = new Set();
-        teamOptions.forEach(option => {
-            if (!seenUrls.has(option.url)) {
-                seenUrls.add(option.url);
-                uniqueResults.push(option);
-            }
-        });
-        
-        return uniqueResults;
-    });
-    
-    console.log(`Found ${results.length} team options`);
-    
-    if (results.length > 0) {
-        // Log all found options
-        results.forEach((result, index) => {
-            console.log(`Option ${index + 1}: ${result.name} - ${result.url}`);
-        });
-        
-        // Store each team option as a separate data item
-        for (const result of results) {
-            await Actor.pushData({
-                type: 'team-option',
-                name: result.name,
-                url: result.url,
-                competition: result.competition,
-                index: results.indexOf(result)
-            });
-        }
-        
-        // Determine which team to select
-        let teamToSelect;
-        if (selectedTeamIndex !== undefined && selectedTeamIndex !== null) {
-            if (selectedTeamIndex >= 0 && selectedTeamIndex < results.length) {
-                teamToSelect = results[selectedTeamIndex];
-                console.log(`Using provided team index ${selectedTeamIndex}: ${teamToSelect.name}`);
-            } else {
-                console.log(`Invalid team index ${selectedTeamIndex}. Defaulting to first option.`);
-                teamToSelect = results[0];
-            }
-        } else {
-            teamToSelect = results[0];
-            console.log(`No team selection provided. Defaulting to first option: ${teamToSelect.name}`);
-        }
-        
-        // Proceed to the team page
-        await requestQueue.addRequest({
-            url: teamToSelect.url,
-            uniqueKey: `team-${Date.now()}`,
-            userData: {
-                stage: 'team-selection',
-            },
-        });
+if (!runMode) {
+    if (drawerUrl) {
+        runMode = 'scraper';
+        console.log('✓ Auto-detected: Scraper mode (drawerUrl provided)');
+    } else if (startUrl && teamName) {
+        runMode = 'discover';
+        console.log('✓ Auto-detected: Discoverer mode (startUrl and teamName provided)');
     } else {
-        console.log('No search results found.');
-        await Actor.pushData({
-            type: 'error',
-            message: 'No search results found',
-            pageUrl: page.url(),
-            teamName: teamName
-        });
+        await Actor.exit();
+        throw new Error('Please provide either:\n' +
+            '- For discoverer: startUrl and teamName\n' +
+            '- For scraper: drawerUrl\n' +
+            '- Or explicitly set mode: "discover" or "scraper"');
     }
 }
 
-async function handleTeamSelection(page) {
-    console.log(`On team page: ${page.url()}`);
-    
-    // Wait for page to load
-    await page.waitForLoadState('domcontentloaded');
-    await page.waitForTimeout(500);
-    
-    // Look for "Draw" or similar links on the team page
-    const drawerInfo = await page.evaluate(() => {
-        // Look for links containing "draw", "squad", "roster", or similar
-        const links = Array.from(document.querySelectorAll('a'));
-        const drawerLink = links.find(link => {
-            const href = link.href?.toLowerCase();
-            const text = link.textContent?.toLowerCase();
-            return (href && (href.includes('draw') || href.includes('squad') || href.includes('roster'))) ||
-                   (text && (text.includes('draw') || text.includes('squad') || text.includes('roster')));
-        });
-        
-        if (drawerLink) {
-            return {
-                found: true,
-                url: drawerLink.href,
-                linkText: drawerLink.textContent?.trim()
-            };
-        }
-        
-        return {
-            found: false,
-            url: null,
-            linkText: null
-        };
-    });
-    
-    // Log drawer info but don't output it - you'll handle that in the second scraper
-    if (drawerInfo.found) {
-        console.log(`✓ Found drawer URL: ${drawerInfo.url}`);
-        console.log(`This URL can be used as input for the second scraper`);
+console.log(`🚀 Starting in ${runMode} mode...`);
+
+// Import and run the appropriate scraper
+// Note: discover.js and scraper.js will call Actor.init() again (which is safe - it's idempotent)
+// and they handle their own Actor.exit() at the end
+try {
+    if (runMode === 'scraper') {
+        await import('./scraper.js');
+    } else if (runMode === 'discover') {
+        await import('./discover.js');
     } else {
-        console.log('✗ No drawer link found on team page');
-        console.log(`Team page URL: ${page.url()}`);
+        await Actor.exit();
+        throw new Error(`Unknown mode: ${runMode}. Must be "discover" or "scraper"`);
     }
+} catch (error) {
+    console.error(`❌ Error running ${runMode}:`, error);
+    // The imported scripts handle their own Actor.exit(), but if error happened before import,
+    // we need to clean up
+    try {
+        await Actor.exit();
+    } catch (exitError) {
+        // Exit might already be called, that's fine
+    }
+    throw error;
 }
 
-await crawler.run();
-
-await Actor.exit();
+// Note: Actor.exit() is already called in discover.js and scraper.js
+// So we don't need to call it here
