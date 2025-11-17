@@ -65,36 +65,114 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
     
-    // Look for search results
-    const results = await page.evaluate(() => {
-        const resultElements = document.querySelectorAll('a[href*="/team/"], a[href*="/competitions/"], .result-item, .search-result, div[class*="result"]');
-        const teamOptions = [];
+    // Try to wait for search results to appear - look for common patterns
+    try {
+        // Wait for any of these selectors to appear (search results container or result links)
+        await Promise.race([
+            page.waitForSelector('#search-results', { timeout: 5000 }).catch(() => null),
+            page.waitForSelector('.search-results', { timeout: 5000 }).catch(() => null),
+            page.waitForSelector('a[href*="/competitions/team/"]', { timeout: 5000 }).catch(() => null),
+            page.waitForSelector('a[href*="/competitions/"][href*="/"]', { timeout: 5000 }).catch(() => null),
+        ]);
+        await page.waitForTimeout(1000); // Give a bit more time for dynamic content
+    } catch (e) {
+        console.log('No specific search results selector found, continuing with general search...');
+    }
+    
+    // Look for search results - improved filtering
+    const results = await page.evaluate((searchTerm) => {
+        // Try to find the search results container
+        // Common patterns: #search-results, .search-results, .results, etc.
+        const searchContainers = document.querySelectorAll('#search-results, .search-results, .results, [class*="search-result"], [class*="result-list"]');
         
-        resultElements.forEach(element => {
-            const link = element.tagName === 'A' ? element : element.querySelector('a');
-            if (link && link.href) {
-                const text = element.textContent?.trim() || link.textContent?.trim();
-                if (text && text.length > 0) {
-                    teamOptions.push({
-                        name: text,
-                        url: link.href
-                    });
+        let resultElements = [];
+        
+        // If we found a search container, look within it
+        if (searchContainers.length > 0) {
+            searchContainers.forEach(container => {
+                const links = container.querySelectorAll('a[href*="/competitions/"]');
+                resultElements.push(...Array.from(links));
+            });
+        } else {
+            // Fallback: find all competition links on the page
+            resultElements = Array.from(document.querySelectorAll('a[href*="/competitions/"]'));
+        }
+        
+        const teamOptions = [];
+        const seenUrls = new Set();
+        
+        resultElements.forEach(link => {
+            if (!link || !link.href) return;
+            
+            const href = link.href.toLowerCase();
+            const text = link.textContent?.trim() || '';
+            
+            // Filter out navigation links and generic pages
+            // Exclude: just /competitions/, /competitions/search, navigation links
+            const excludePatterns = [
+                '/competitions/$',
+                '/competitions/search',
+                '/competitions#',
+                'javascript:',
+                '#'
+            ];
+            
+            const shouldExclude = excludePatterns.some(pattern => {
+                if (pattern.endsWith('$')) {
+                    return href.endsWith(pattern.slice(0, -1));
+                }
+                return href.includes(pattern);
+            });
+            
+            if (shouldExclude) {
+                return;
+            }
+            
+            // Only include links that look like team/competition pages
+            // They should have a path like /competitions/[something]/ or /competitions/team/
+            const urlPath = new URL(link.href).pathname;
+            const pathParts = urlPath.split('/').filter(p => p);
+            
+            // Should have more than just "competitions" in the path
+            // e.g., /competitions/team/123 or /competitions/123/ or /competitions/comp-name
+            if (pathParts.length < 2 || pathParts[0] !== 'competitions') {
+                return;
+            }
+            
+            // Skip if we've already seen this URL
+            if (seenUrls.has(link.href)) {
+                return;
+            }
+            
+            // Make URL absolute if needed
+            const absoluteUrl = link.href.startsWith('http') 
+                ? link.href 
+                : `https://touchfootball.com.au${link.href}`;
+            
+            // Get a better name - look for text in the link or nearby elements
+            let teamName = text;
+            if (!teamName || teamName.length < 2) {
+                // Try to find name in parent elements
+                const parent = link.closest('div, li, article, section, tr, td');
+                if (parent) {
+                    teamName = parent.textContent?.trim() || '';
                 }
             }
-        });
-        
-        // Remove duplicates based on URL
-        const uniqueResults = [];
-        const seenUrls = new Set();
-        teamOptions.forEach(option => {
-            if (!seenUrls.has(option.url)) {
-                seenUrls.add(option.url);
-                uniqueResults.push(option);
+            
+            // Clean up the name (remove extra whitespace, newlines)
+            teamName = teamName.replace(/\s+/g, ' ').trim();
+            
+            if (teamName && teamName.length > 0 && !teamName.toLowerCase().includes('competitions')) {
+                seenUrls.add(link.href);
+                teamOptions.push({
+                    name: teamName,
+                    url: absoluteUrl
+                });
             }
         });
         
-        return uniqueResults;
-    });
+        return teamOptions;
+    }, teamName.toLowerCase());
     
     console.log(`Found ${results.length} team options`);
     
@@ -136,6 +214,11 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
         });
     } else {
         console.log('No search results found.');
+        // Debug: log the page HTML to help diagnose
+        const pageContent = await page.content();
+        console.log('Page URL:', page.url());
+        console.log('Page title:', await page.title());
+        
         await Actor.pushData({
             type: 'error',
             message: 'No search results found',
