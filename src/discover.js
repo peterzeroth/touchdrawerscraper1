@@ -65,79 +65,30 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
     await page.waitForLoadState('networkidle');
     await page.waitForTimeout(3000);
     
-    // Try to wait for search results to appear - look for common patterns
+    // Wait for search results grid to appear (the l-grid__cell containers)
     try {
-        // Wait for any of these selectors to appear (search results container or result links)
-        await Promise.race([
-            page.waitForSelector('#search-results', { timeout: 5000 }).catch(() => null),
-            page.waitForSelector('.search-results', { timeout: 5000 }).catch(() => null),
-            page.waitForSelector('a[href*="/competitions/team/"]', { timeout: 5000 }).catch(() => null),
-            page.waitForSelector('a[href*="/competitions/"][href*="/"]', { timeout: 5000 }).catch(() => null),
-        ]);
+        await page.waitForSelector('.l-grid__cell a[href*="/Competitions/Competition/"]', { timeout: 10000 });
         await page.waitForTimeout(1000); // Give a bit more time for dynamic content
     } catch (e) {
-        console.log('No specific search results selector found, continuing with general search...');
+        console.log('Waiting for search results...');
+        // Try alternative selectors
+        try {
+            await page.waitForSelector('a[href*="/Competitions/Competition/"]', { timeout: 5000 });
+        } catch (e2) {
+            console.log('No search results found with expected structure');
+        }
     }
     
-    // Look for search results - improved filtering
+    // Look for search results - targeting the specific HTML structure
     const results = await page.evaluate((searchTerm) => {
-        // Try to find the search results container
-        // Common patterns: #search-results, .search-results, .results, etc.
-        const searchContainers = document.querySelectorAll('#search-results, .search-results, .results, [class*="search-result"], [class*="result-list"]');
-        
-        let resultElements = [];
-        
-        // If we found a search container, look within it
-        if (searchContainers.length > 0) {
-            searchContainers.forEach(container => {
-                const links = container.querySelectorAll('a[href*="/competitions/"]');
-                resultElements.push(...Array.from(links));
-            });
-        } else {
-            // Fallback: find all competition links on the page
-            resultElements = Array.from(document.querySelectorAll('a[href*="/competitions/"]'));
-        }
+        // Find all result cards (they're in div.l-grid__cell with links)
+        const resultCards = document.querySelectorAll('.l-grid__cell a[href*="/Competitions/Competition/"]');
         
         const teamOptions = [];
         const seenUrls = new Set();
         
-        resultElements.forEach(link => {
+        resultCards.forEach(link => {
             if (!link || !link.href) return;
-            
-            const href = link.href.toLowerCase();
-            const text = link.textContent?.trim() || '';
-            
-            // Filter out navigation links and generic pages
-            // Exclude: just /competitions/, /competitions/search, navigation links
-            const excludePatterns = [
-                '/competitions/$',
-                '/competitions/search',
-                '/competitions#',
-                'javascript:',
-                '#'
-            ];
-            
-            const shouldExclude = excludePatterns.some(pattern => {
-                if (pattern.endsWith('$')) {
-                    return href.endsWith(pattern.slice(0, -1));
-                }
-                return href.includes(pattern);
-            });
-            
-            if (shouldExclude) {
-                return;
-            }
-            
-            // Only include links that look like team/competition pages
-            // They should have a path like /competitions/[something]/ or /competitions/team/
-            const urlPath = new URL(link.href).pathname;
-            const pathParts = urlPath.split('/').filter(p => p);
-            
-            // Should have more than just "competitions" in the path
-            // e.g., /competitions/team/123 or /competitions/123/ or /competitions/comp-name
-            if (pathParts.length < 2 || pathParts[0] !== 'competitions') {
-                return;
-            }
             
             // Skip if we've already seen this URL
             if (seenUrls.has(link.href)) {
@@ -149,24 +100,65 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
                 ? link.href 
                 : `https://touchfootball.com.au${link.href}`;
             
-            // Get a better name - look for text in the link or nearby elements
-            let teamName = text;
-            if (!teamName || teamName.length < 2) {
-                // Try to find name in parent elements
-                const parent = link.closest('div, li, article, section, tr, td');
-                if (parent) {
-                    teamName = parent.textContent?.trim() || '';
+            // Extract team name from <dl class="u-spacing-mb-xx-small"> inside the link
+            // This is the team name element
+            const teamNameElement = link.querySelector('dl.u-spacing-mb-xx-small');
+            let teamName = '';
+            
+            if (teamNameElement) {
+                teamName = teamNameElement.textContent?.trim() || '';
+            }
+            
+            // Fallback: try to find team name in the link's text content
+            if (!teamName || teamName.length < 1) {
+                // Look for the result type lozenge and get text after it
+                const lozenge = link.querySelector('.o-lozenge');
+                if (lozenge) {
+                    const allText = link.textContent || '';
+                    const lozengeText = lozenge.textContent || '';
+                    const afterLozenge = allText.replace(lozengeText, '').trim();
+                    // Split by newlines and get first non-empty line (should be team name)
+                    const lines = afterLozenge.split('\n').map(l => l.trim()).filter(l => l);
+                    teamName = lines[0] || '';
+                } else {
+                    teamName = link.textContent?.trim() || '';
                 }
             }
             
-            // Clean up the name (remove extra whitespace, newlines)
+            // Extract competition name from <p class="club-card-content__club">
+            const competitionElement = link.querySelector('.club-card-content__club');
+            let competitionName = '';
+            
+            if (competitionElement) {
+                competitionName = competitionElement.textContent?.trim() || '';
+            }
+            
+            // Extract result type (Team, Competition, etc.)
+            const resultTypeElement = link.querySelector('.o-lozenge');
+            let resultType = '';
+            
+            if (resultTypeElement) {
+                resultType = resultTypeElement.textContent?.trim() || '';
+            }
+            
+            // Clean up team name (remove extra whitespace, newlines)
             teamName = teamName.replace(/\s+/g, ' ').trim();
             
-            if (teamName && teamName.length > 0 && !teamName.toLowerCase().includes('competitions')) {
+            // Only include if we have a valid team name and it's a "Team" result type
+            if (teamName && teamName.length > 0) {
+                // Filter: prefer "Team" results, but include others too if no team filter
+                if (resultType && resultType.toLowerCase() !== 'team') {
+                    console.log(`Skipping non-team result: ${resultType} - ${teamName}`);
+                    // You could skip non-team results here if needed
+                    // return;
+                }
+                
                 seenUrls.add(link.href);
                 teamOptions.push({
                     name: teamName,
-                    url: absoluteUrl
+                    url: absoluteUrl,
+                    competition: competitionName,
+                    resultType: resultType
                 });
             }
         });
@@ -179,7 +171,9 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
     if (results.length > 0) {
         // Log all found options
         results.forEach((result, index) => {
-            console.log(`Option ${index + 1}: ${result.name} - ${result.url}`);
+            const compInfo = result.competition ? ` (${result.competition})` : '';
+            const typeInfo = result.resultType ? ` [${result.resultType}]` : '';
+            console.log(`Option ${index + 1}: ${result.name}${compInfo}${typeInfo} - ${result.url}`);
         });
         
         // Store team options
