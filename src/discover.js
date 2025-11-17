@@ -61,23 +61,31 @@ const crawler = new PlaywrightCrawler({
 async function handleSearch(page, teamName, selectedTeamIndex) {
     console.log(`Searching for team: ${teamName}`);
     
-    // Wait for the page to load
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(3000);
+    // Wait for the page to load - use domcontentloaded first for faster initial load
+    try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 10000 });
+    } catch (e) {
+        console.log('Page load timeout, continuing...');
+    }
     
     // Wait for search results grid to appear (the l-grid__cell containers)
+    // This is more reliable than waiting for networkidle
     try {
-        await page.waitForSelector('.l-grid__cell a[href*="/Competitions/Competition/"]', { timeout: 10000 });
-        await page.waitForTimeout(1000); // Give a bit more time for dynamic content
+        await page.waitForSelector('.l-grid__cell a[href*="/Competitions/Competition/"]', { timeout: 15000 });
+        console.log('Search results grid found');
     } catch (e) {
         console.log('Waiting for search results...');
         // Try alternative selectors
         try {
             await page.waitForSelector('a[href*="/Competitions/Competition/"]', { timeout: 5000 });
+            console.log('Found alternative search results structure');
         } catch (e2) {
             console.log('No search results found with expected structure');
         }
     }
+    
+    // Give a bit more time for dynamic content to fully load
+    await page.waitForTimeout(2000);
     
     // Look for search results - targeting the specific HTML structure
     const results = await page.evaluate((searchTerm) => {
@@ -163,10 +171,11 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
             }
         });
         
-        return teamOptions;
+        // Limit to first 20 results to avoid overwhelming output
+        return teamOptions.slice(0, 20);
     }, teamName.toLowerCase());
     
-    console.log(`Found ${results.length} team options`);
+    console.log(`Found ${results.length} team options (limited to 20)`);
     
     if (results.length > 0) {
         // Log all found options
