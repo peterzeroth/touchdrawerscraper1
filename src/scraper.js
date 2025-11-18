@@ -96,29 +96,37 @@ async function handleDrawScraping(page) {
             if (statusLozenge) {
                 // Get text content and clean it up thoroughly
                 // The HTML might have newlines and weird spacing like "F\n                    ull T\n                    ime"
-                gameStatus = statusLozenge.textContent
-                    .replace(/[\n\r\t]/g, ' ')     // Replace all newlines, carriage returns, tabs with spaces
-                    .replace(/\s+/g, ' ')          // Normalize multiple spaces/newlines to single space
-                    .trim();
+                let rawStatus = statusLozenge.textContent || '';
                 
-                // Check if game is completed (Full Time, Final, etc.)
-                // Normalize for comparison - ensure single spaces
-                const statusText = gameStatus.toLowerCase().replace(/\s+/g, ' ').trim();
-                isCompleted = statusText.includes('full time') || 
-                             statusText.includes('final') || 
-                             statusText.includes('complete') ||
-                             statusText.includes('finished');
+                // First, normalize all whitespace (newlines, tabs, spaces) to single spaces
+                rawStatus = rawStatus.replace(/[\n\r\t]/g, ' ').replace(/\s+/g, ' ').trim();
                 
-                // If status contains "full time" but has weird spacing, normalize it
-                if (statusText.includes('full') && statusText.includes('time')) {
-                    // Reconstruct properly formatted status
+                // Create a version without any spaces for pattern matching
+                const statusNoSpaces = rawStatus.toLowerCase().replace(/\s+/g, '');
+                
+                // Check if game is completed by looking for patterns in the space-free version
+                if (statusNoSpaces.includes('fulltime') || 
+                    (statusNoSpaces.includes('full') && statusNoSpaces.includes('time'))) {
+                    isCompleted = true;
                     gameStatus = 'Full Time';
-                } else if (statusText.includes('final')) {
+                } else if (statusNoSpaces.includes('final')) {
+                    isCompleted = true;
                     gameStatus = 'Final';
-                } else if (statusText.includes('complete')) {
+                } else if (statusNoSpaces.includes('complete')) {
+                    isCompleted = true;
                     gameStatus = 'Complete';
-                } else if (statusText.includes('finished')) {
+                } else if (statusNoSpaces.includes('finished')) {
+                    isCompleted = true;
                     gameStatus = 'Finished';
+                } else {
+                    // If no match, use the cleaned version but keep original for display
+                    gameStatus = rawStatus;
+                    // Check the normalized version for completion
+                    const statusLower = rawStatus.toLowerCase();
+                    isCompleted = statusLower.includes('full time') || 
+                                 statusLower.includes('final') || 
+                                 statusLower.includes('complete') ||
+                                 statusLower.includes('finished');
                 }
             }
             
