@@ -94,40 +94,54 @@ async function handleDrawScraping(page) {
             let isCompleted = false;
             
             if (statusLozenge) {
-                gameStatus = statusLozenge.textContent.trim();
+                // Get text content and clean it up (remove newlines, normalize whitespace)
+                gameStatus = statusLozenge.textContent
+                    .replace(/\n/g, ' ')           // Replace newlines with spaces
+                    .replace(/\s+/g, ' ')          // Normalize multiple spaces to single space
+                    .trim();
+                
                 // Check if game is completed (Full Time, Final, etc.)
-                const statusText = gameStatus.toLowerCase();
+                // Normalize for comparison
+                const statusText = gameStatus.toLowerCase().replace(/\s+/g, ' ');
                 isCompleted = statusText.includes('full time') || 
                              statusText.includes('final') || 
                              statusText.includes('complete') ||
                              statusText.includes('finished');
             }
             
-            // Extract scores if game is completed
+            // Extract scores - check if scores exist regardless of status detection
             let homeScore = null;
             let awayScore = null;
             
-            if (isCompleted) {
-                // Extract home team score
-                const homeScoreEl = matchEl.querySelector('.match-team__score--home');
-                if (homeScoreEl) {
-                    // Get the text content, but exclude the "Scored" and "points" text
-                    const scoreText = homeScoreEl.textContent.trim();
-                    // Extract just the number (remove "Scored", "points", and whitespace)
-                    const scoreMatch = scoreText.match(/\d+/);
-                    if (scoreMatch) {
-                        homeScore = parseInt(scoreMatch[0], 10);
-                    }
+            // Extract home team score
+            const homeScoreEl = matchEl.querySelector('.match-team__score--home');
+            if (homeScoreEl) {
+                // Get all text content from the element
+                const scoreText = homeScoreEl.textContent || '';
+                // Extract just the number - look for digits
+                // The score might be separated by newlines or spaces
+                const scoreMatch = scoreText.replace(/\s+/g, ' ').match(/\b(\d+)\b/);
+                if (scoreMatch) {
+                    homeScore = parseInt(scoreMatch[1], 10);
                 }
-                
-                // Extract away team score
-                const awayScoreEl = matchEl.querySelector('.match-team__score--away');
-                if (awayScoreEl) {
-                    const scoreText = awayScoreEl.textContent.trim();
-                    const scoreMatch = scoreText.match(/\d+/);
-                    if (scoreMatch) {
-                        awayScore = parseInt(scoreMatch[0], 10);
-                    }
+            }
+            
+            // Extract away team score
+            const awayScoreEl = matchEl.querySelector('.match-team__score--away');
+            if (awayScoreEl) {
+                const scoreText = awayScoreEl.textContent || '';
+                const scoreMatch = scoreText.replace(/\s+/g, ' ').match(/\b(\d+)\b/);
+                if (scoreMatch) {
+                    awayScore = parseInt(scoreMatch[1], 10);
+                }
+            }
+            
+            // If we found scores, mark as completed (in case status detection failed)
+            if ((homeScore !== null || awayScore !== null) && !isCompleted) {
+                isCompleted = true;
+                // Update status if empty
+                if (!gameStatus) {
+                    gameStatus = 'Full Time';
                 }
             }
             
