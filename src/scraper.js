@@ -88,6 +88,49 @@ async function handleDrawScraping(page) {
             // Extract match URL relative path
             const matchUrlRelative = matchLink ? matchLink.getAttribute('href') : '';
             
+            // Check if game is completed (has "Full Time" or similar status)
+            const statusLozenge = matchEl.querySelector('.match__lozenge');
+            let gameStatus = '';
+            let isCompleted = false;
+            
+            if (statusLozenge) {
+                gameStatus = statusLozenge.textContent.trim();
+                // Check if game is completed (Full Time, Final, etc.)
+                const statusText = gameStatus.toLowerCase();
+                isCompleted = statusText.includes('full time') || 
+                             statusText.includes('final') || 
+                             statusText.includes('complete') ||
+                             statusText.includes('finished');
+            }
+            
+            // Extract scores if game is completed
+            let homeScore = null;
+            let awayScore = null;
+            
+            if (isCompleted) {
+                // Extract home team score
+                const homeScoreEl = matchEl.querySelector('.match-team__score--home');
+                if (homeScoreEl) {
+                    // Get the text content, but exclude the "Scored" and "points" text
+                    const scoreText = homeScoreEl.textContent.trim();
+                    // Extract just the number (remove "Scored", "points", and whitespace)
+                    const scoreMatch = scoreText.match(/\d+/);
+                    if (scoreMatch) {
+                        homeScore = parseInt(scoreMatch[0], 10);
+                    }
+                }
+                
+                // Extract away team score
+                const awayScoreEl = matchEl.querySelector('.match-team__score--away');
+                if (awayScoreEl) {
+                    const scoreText = awayScoreEl.textContent.trim();
+                    const scoreMatch = scoreText.match(/\d+/);
+                    if (scoreMatch) {
+                        awayScore = parseInt(scoreMatch[0], 10);
+                    }
+                }
+            }
+            
             if (homeTeam && awayTeam) {
                 matchesData.push({
                     date: date,
@@ -98,7 +141,11 @@ async function handleDrawScraping(page) {
                     awayTeam: awayTeam,
                     venue: venue,
                     matchUrl: matchUrl,
-                    matchUrlRelative: matchUrlRelative
+                    matchUrlRelative: matchUrlRelative,
+                    gameStatus: gameStatus,
+                    isCompleted: isCompleted,
+                    homeScore: homeScore,
+                    awayScore: awayScore
                 });
             }
         });
@@ -122,6 +169,10 @@ async function handleDrawScraping(page) {
                 venue: match.venue,
                 matchUrl: match.matchUrl,
                 matchUrlRelative: match.matchUrlRelative,
+                gameStatus: match.gameStatus,
+                isCompleted: match.isCompleted,
+                homeScore: match.homeScore,
+                awayScore: match.awayScore,
                 scrapedFrom: page.url()
             });
         }
