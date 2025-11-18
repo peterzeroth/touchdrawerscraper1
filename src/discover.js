@@ -43,9 +43,8 @@ const crawler = new PlaywrightCrawler({
 
         if (stage === 'search') {
             await handleSearch(page, teamName, selectedTeamIndex);
-        } else if (stage === 'team-selection') {
-            await handleTeamSelection(page);
         }
+        // Note: team-selection stage removed - not needed as we get all info from search results
     },
     
     async errorHandler({ request }) {
@@ -192,29 +191,23 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
             selectedIndex: selectedTeamIndex
         });
         
-        // Determine which team to select
+        // Log which team would be selected (for informational purposes)
         let teamToSelect;
         if (selectedTeamIndex !== undefined && selectedTeamIndex !== null) {
             if (selectedTeamIndex >= 0 && selectedTeamIndex < results.length) {
                 teamToSelect = results[selectedTeamIndex];
-                console.log(`Using provided team index ${selectedTeamIndex}: ${teamToSelect.name}`);
+                console.log(`Selected team (index ${selectedTeamIndex}): ${teamToSelect.name}`);
             } else {
-                console.log(`Invalid team index ${selectedTeamIndex}. Defaulting to first option.`);
+                console.log(`Invalid team index ${selectedTeamIndex}. Would default to first option.`);
                 teamToSelect = results[0];
             }
         } else {
             teamToSelect = results[0];
-            console.log(`No team selection provided. Defaulting to first option: ${teamToSelect.name}`);
+            console.log(`No team selection provided. Would default to first option: ${teamToSelect.name}`);
         }
         
-        // Proceed to the team page
-        await requestQueue.addRequest({
-            url: teamToSelect.url,
-            uniqueKey: `team-${Date.now()}`,
-            userData: {
-                stage: 'team-selection',
-            },
-        });
+        console.log(`✓ Discovery complete. Found ${results.length} team options.`);
+        // No need to navigate to team page - we have all the info we need from search results
     } else {
         console.log('No search results found.');
         // Debug: log the page HTML to help diagnose
@@ -228,64 +221,6 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
             pageUrl: page.url(),
             teamName: teamName
         });
-    }
-}
-
-async function handleTeamSelection(page) {
-    console.log(`On team page: ${page.url()}`);
-    
-    // Wait for page to load - use domcontentloaded for faster processing
-    try {
-        await page.waitForLoadState('domcontentloaded', { timeout: 10000 });
-    } catch (e) {
-        console.log('Page load timeout, continuing...');
-    }
-    
-    // Wait a bit for dynamic content, but much less than networkidle
-    await page.waitForTimeout(1000);
-    
-    // Look for "Draw" or similar links on the team page
-    const drawerInfo = await page.evaluate(() => {
-        // Look for links containing "draw", "squad", "roster", or similar
-        const links = Array.from(document.querySelectorAll('a'));
-        const drawerLink = links.find(link => {
-            const href = link.href?.toLowerCase();
-            const text = link.textContent?.toLowerCase();
-            return (href && (href.includes('draw') || href.includes('squad') || href.includes('roster'))) ||
-                   (text && (text.includes('draw') || text.includes('squad') || text.includes('roster')));
-        });
-        
-        if (drawerLink) {
-            return {
-                found: true,
-                url: drawerLink.href,
-                linkText: drawerLink.textContent?.trim()
-            };
-        }
-        
-        return {
-            found: false,
-            url: null,
-            linkText: null
-        };
-    });
-    
-    // Save the result
-    await Actor.pushData({
-        type: 'drawer-url',
-        found: drawerInfo.found,
-        url: drawerInfo.url,
-        linkText: drawerInfo.linkText,
-        teamPageUrl: page.url(),
-        timestamp: new Date().toISOString()
-    });
-    
-    if (drawerInfo.found) {
-        console.log(`✓ Successfully found drawer URL: ${drawerInfo.url}`);
-        console.log(`Link text: ${drawerInfo.linkText}`);
-    } else {
-        console.log('✗ No drawer link found on team page');
-        console.log(`Team page URL: ${page.url()}`);
     }
 }
 
