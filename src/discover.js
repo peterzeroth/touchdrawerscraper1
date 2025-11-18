@@ -84,8 +84,8 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
         }
     }
     
-    // Give a bit more time for dynamic content to fully load
-    await page.waitForTimeout(2000);
+    // Give a bit more time for dynamic content to fully load (reduced from 2s)
+    await page.waitForTimeout(500);
     
     // Look for search results - targeting the specific HTML structure
     const results = await page.evaluate((searchTerm) => {
@@ -234,9 +234,15 @@ async function handleSearch(page, teamName, selectedTeamIndex) {
 async function handleTeamSelection(page) {
     console.log(`On team page: ${page.url()}`);
     
-    // Wait for page to load
-    await page.waitForLoadState('networkidle');
-    await page.waitForTimeout(2000);
+    // Wait for page to load - use domcontentloaded for faster processing
+    try {
+        await page.waitForLoadState('domcontentloaded', { timeout: 10000 });
+    } catch (e) {
+        console.log('Page load timeout, continuing...');
+    }
+    
+    // Wait a bit for dynamic content, but much less than networkidle
+    await page.waitForTimeout(1000);
     
     // Look for "Draw" or similar links on the team page
     const drawerInfo = await page.evaluate(() => {
