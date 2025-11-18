@@ -94,19 +94,32 @@ async function handleDrawScraping(page) {
             let isCompleted = false;
             
             if (statusLozenge) {
-                // Get text content and clean it up (remove newlines, normalize whitespace)
+                // Get text content and clean it up thoroughly
+                // The HTML might have newlines and weird spacing like "F\n                    ull T\n                    ime"
                 gameStatus = statusLozenge.textContent
-                    .replace(/\n/g, ' ')           // Replace newlines with spaces
-                    .replace(/\s+/g, ' ')          // Normalize multiple spaces to single space
+                    .replace(/[\n\r\t]/g, ' ')     // Replace all newlines, carriage returns, tabs with spaces
+                    .replace(/\s+/g, ' ')          // Normalize multiple spaces/newlines to single space
                     .trim();
                 
                 // Check if game is completed (Full Time, Final, etc.)
-                // Normalize for comparison
-                const statusText = gameStatus.toLowerCase().replace(/\s+/g, ' ');
+                // Normalize for comparison - ensure single spaces
+                const statusText = gameStatus.toLowerCase().replace(/\s+/g, ' ').trim();
                 isCompleted = statusText.includes('full time') || 
                              statusText.includes('final') || 
                              statusText.includes('complete') ||
                              statusText.includes('finished');
+                
+                // If status contains "full time" but has weird spacing, normalize it
+                if (statusText.includes('full') && statusText.includes('time')) {
+                    // Reconstruct properly formatted status
+                    gameStatus = 'Full Time';
+                } else if (statusText.includes('final')) {
+                    gameStatus = 'Final';
+                } else if (statusText.includes('complete')) {
+                    gameStatus = 'Complete';
+                } else if (statusText.includes('finished')) {
+                    gameStatus = 'Finished';
+                }
             }
             
             // Extract scores - check if scores exist regardless of status detection
@@ -136,12 +149,50 @@ async function handleDrawScraping(page) {
                 }
             }
             
-            // If we found scores, mark as completed (in case status detection failed)
-            if ((homeScore !== null || awayScore !== null) && !isCompleted) {
-                isCompleted = true;
-                // Update status if empty
-                if (!gameStatus) {
-                    gameStatus = 'Full Time';
+            // Determine if game is actually completed
+            // Check if there's a kickOffTime/dateTime - if so, verify if it's in the past
+            if (dateTime) {
+                try {
+                    const matchDateTime = new Date(dateTime);
+                    const now = new Date();
+                    // If the game time is in the future, it's not completed yet
+                    if (matchDateTime > now) {
+                        isCompleted = false;
+                        // Clear scores if game hasn't happened yet (they might be defaults/placeholders)
+                        if (homeScore === 0 && awayScore === 0) {
+                            homeScore = null;
+                            awayScore = null;
+                        }
+                    } else {
+                        // Game time is in the past - check if we should mark as completed
+                        // Only mark as completed if:
+                        // 1. Status explicitly says it's completed, OR
+                        // 2. We found actual non-zero scores
+                        if (!isCompleted && (homeScore !== null || awayScore !== null)) {
+                            // Only mark as completed if scores are non-zero (actual game results)
+                            if (homeScore > 0 || awayScore > 0) {
+                                isCompleted = true;
+                                if (!gameStatus) {
+                                    gameStatus = 'Full Time';
+                                }
+                            }
+                        }
+                    }
+                } catch (e) {
+                    // If date parsing fails, rely on status detection
+                    console.log('Date parsing failed, using status detection');
+                }
+            } else {
+                // No dateTime - rely on status detection and scores
+                // If we found scores and status wasn't detected, check if scores are real
+                if ((homeScore !== null || awayScore !== null) && !isCompleted) {
+                    // Only mark as completed if scores are non-zero (actual game results)
+                    if (homeScore > 0 || awayScore > 0) {
+                        isCompleted = true;
+                        if (!gameStatus) {
+                            gameStatus = 'Full Time';
+                        }
+                    }
                 }
             }
             
